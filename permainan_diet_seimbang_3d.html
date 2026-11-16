@@ -1,0 +1,659 @@
+<!DOCTYPE html>
+<html lang="ms">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Permainan 3D Diet Seimbang</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+    <style>
+        body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background-color: #000; font-family: 'Inter', sans-serif; touch-action: none; }
+        #game-canvas { display: block; width: 100%; height: 100%; }
+        
+        /* UI Overlays */
+        #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
+        .pointer-events-auto { pointer-events: auto; }
+        
+        /* Crosshair */
+        #crosshair {
+            position: absolute; top: 50%; left: 50%; width: 10px; height: 10px;
+            background-color: white; border: 2px solid black; border-radius: 50%;
+            transform: translate(-50%, -50%); pointer-events: none; z-index: 10;
+        }
+
+        /* Virtual Joysticks (Mobile) */
+        .joystick-zone {
+            position: absolute; bottom: 20px; width: 120px; height: 120px;
+            background: rgba(255,255,255,0.2); border-radius: 50%; border: 2px solid rgba(255,255,255,0.5);
+            display: none; pointer-events: none; z-index: 5;
+        }
+        #joystick-left { left: 20px; }
+        #joystick-right { right: 20px; display: flex; justify-content: center; align-items: center; text-align: center; color: rgba(255,255,255,0.7); font-size: 12px; font-weight: bold;}
+        .joystick-knob {
+            position: absolute; top: 50%; left: 50%; width: 40px; height: 40px;
+            background: rgba(255,255,255,0.8); border-radius: 50%;
+            transform: translate(-50%, -50%);
+        }
+
+        /* Animations */
+        @keyframes pop { 0% { transform: scale(0.8); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
+        .animate-pop { animation: pop 0.3s ease-out forwards; }
+    </style>
+</head>
+<body>
+
+    <!-- Canvas for 3D Game -->
+    <canvas id="game-canvas"></canvas>
+
+    <!-- Crosshair -->
+    <div id="crosshair"></div>
+
+    <!-- UI Layer -->
+    <div id="ui-layer" class="flex flex-col justify-between p-4">
+        
+        <!-- Top Bar -->
+        <div class="flex justify-between items-start pointer-events-auto">
+            <div class="bg-white/80 backdrop-blur-md px-4 py-2 rounded-xl shadow-lg border border-white/50">
+                <h1 class="text-lg font-bold text-gray-800">Markah: <span id="score-display" class="text-green-600">0</span>/60</h1>
+                <p id="game-status" class="text-sm text-gray-600 font-medium">Cari makanan di sekeliling anda</p>
+            </div>
+            <button id="btn-settings" class="bg-gray-800/80 hover:bg-gray-700 text-white p-3 rounded-full shadow-lg transition-transform transform hover:scale-105">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-6 h-6">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
+            </button>
+        </div>
+
+        <!-- Interaction UI (Hidden by default) -->
+        <div id="interaction-ui" class="hidden pointer-events-auto flex-col items-center mb-24 animate-pop">
+            <div class="bg-white/90 backdrop-blur px-6 py-4 rounded-2xl shadow-2xl border-2 border-blue-200 text-center mb-4">
+                <h2 id="food-name" class="text-2xl font-black text-gray-800 mb-1">Nama Makanan</h2>
+                <p class="text-sm text-gray-500 mb-4">Adakah makanan ini sihat?</p>
+                <div class="flex gap-4">
+                    <button onclick="classifyFood(true)" class="bg-green-500 hover:bg-green-600 text-white font-bold py-3 px-6 rounded-xl shadow-lg transform active:scale-95 transition-all">
+                        SIHAT
+                    </button>
+                    <button onclick="classifyFood(false)" class="bg-red-500 hover:bg-red-600 text-white font-bold py-3 px-6 rounded-xl shadow-lg transform active:scale-95 transition-all">
+                        TIDAK SIHAT
+                    </button>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Virtual Joysticks -->
+    <div id="joystick-left" class="joystick-zone"><div class="joystick-knob" id="knob-left"></div></div>
+    <div id="joystick-right" class="joystick-zone">Sentuh & Seret<br>untuk Lihat</div>
+
+    <!-- Start / Message Screen -->
+    <div id="overlay-screen" class="absolute inset-0 bg-black/80 backdrop-blur-sm flex justify-center items-center z-50 pointer-events-auto">
+        <div class="bg-white p-8 rounded-3xl shadow-2xl max-w-md text-center mx-4 animate-pop">
+            <h1 class="text-3xl font-black text-green-600 mb-2">Diet Seimbang 3D</h1>
+            <p class="text-gray-600 mb-6 leading-relaxed">Cari makanan di sekeliling anda dan kelaskan sama ada ia <b>Sihat</b> atau <b>Tidak Sihat</b>. <br><br>Gunakan skrin sentuh (Mobile) atau Tetikus & WASD (PC) untuk bergerak.</p>
+            <button id="btn-start" class="bg-blue-600 hover:bg-blue-700 w-full text-white font-bold py-4 px-8 rounded-xl shadow-lg text-lg transform hover:-translate-y-1 transition-all">
+                Mula Bermain
+            </button>
+        </div>
+    </div>
+
+    <!-- Settings Modal -->
+    <div id="settings-modal" class="hidden absolute inset-0 bg-black/60 backdrop-blur-sm flex justify-center items-center z-50 pointer-events-auto">
+        <div class="bg-white p-8 rounded-3xl shadow-2xl w-80 text-left animate-pop">
+            <h2 class="text-2xl font-black text-gray-800 mb-6 border-b pb-2">Tetapan</h2>
+            
+            <div class="space-y-4">
+                <div class="flex justify-between items-center">
+                    <span class="font-medium text-gray-700">Muzik / Bunyi</span>
+                    <label class="relative inline-flex items-center cursor-pointer">
+                        <input type="checkbox" id="toggle-music" class="sr-only peer" checked>
+                        <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-green-500"></div>
+                    </label>
+                </div>
+
+                <div class="flex justify-between items-center">
+                    <span class="font-medium text-gray-700">Resolusi Tinggi</span>
+                    <label class="relative inline-flex items-center cursor-pointer">
+                        <input type="checkbox" id="toggle-resolution" class="sr-only peer" checked>
+                        <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-500"></div>
+                    </label>
+                </div>
+
+                <div class="flex flex-col gap-1">
+                    <span class="font-medium text-gray-700">Kawalan</span>
+                    <select id="select-controller" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5">
+                        <option value="touch">Skrin Sentuh (Joystick)</option>
+                        <option value="keyboard">Papan Kekunci & Tetikus</option>
+                    </select>
+                </div>
+
+                <div class="flex justify-between items-center pt-2">
+                    <span class="font-medium text-gray-700">Skrin Penuh</span>
+                    <button id="btn-fullscreen" class="bg-gray-200 hover:bg-gray-300 text-gray-800 text-sm font-semibold py-1 px-3 rounded-lg">Buka</button>
+                </div>
+            </div>
+
+            <button id="btn-close-settings" class="mt-8 w-full bg-gray-800 hover:bg-gray-900 text-white font-bold py-3 px-4 rounded-xl transition-colors">
+                Tutup Tetapan
+            </button>
+        </div>
+    </div>
+
+    <!-- End Game Overlay -->
+    <div id="end-screen" class="hidden absolute inset-0 bg-white/90 backdrop-blur-md flex justify-center items-center z-50 pointer-events-auto">
+        <div class="text-center animate-pop">
+            <h1 class="text-5xl font-black text-gray-800 mb-4">Permainan Tamat!</h1>
+            <p class="text-2xl text-gray-600 mb-8">Markah Akhir: <span id="final-score" class="font-bold text-green-600"></span></p>
+            <button onclick="location.reload()" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 px-10 rounded-2xl shadow-xl text-xl transform hover:-translate-y-1 transition-all">
+                Main Semula
+            </button>
+        </div>
+    </div>
+
+    <script>
+        // --- GAME VARIABLES ---
+        let score = 0;
+        let foodsClassified = 0;
+        const totalFoods = 6;
+        let isGameStarted = false;
+        let interactableObjects = [];
+        let currentTarget = null;
+        let settings = { music: true, highRes: true, controller: 'touch' };
+
+        // --- THREE.JS SETUP ---
+        const canvas = document.getElementById('game-canvas');
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x87CEEB); // Sky
+        scene.fog = new THREE.Fog(0x87CEEB, 10, 50);
+
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 100);
+        camera.position.set(0, 1.6, 0); // Player height
+
+        const renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+        // --- LIGHTING ---
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+        scene.add(ambientLight);
+
+        const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        dirLight.position.set(10, 20, 10);
+        dirLight.castShadow = true;
+        dirLight.shadow.mapSize.width = 1024;
+        dirLight.shadow.mapSize.height = 1024;
+        scene.add(dirLight);
+
+        // --- ENVIRONMENT ---
+        // Floor
+        const floorGeo = new THREE.PlaneGeometry(100, 100);
+        const floorMat = new THREE.MeshStandardMaterial({ color: 0x55aa55, roughness: 0.8 });
+        const floor = new THREE.Mesh(floorGeo, floorMat);
+        floor.rotation.x = -Math.PI / 2;
+        floor.receiveShadow = true;
+        scene.add(floor);
+
+        // Walls (Simple Arena)
+        const wallMat = new THREE.MeshStandardMaterial({ color: 0xdddddd, roughness: 1 });
+        const wallGeo = new THREE.BoxGeometry(40, 10, 1);
+        const wall1 = new THREE.Mesh(wallGeo, wallMat); wall1.position.set(0, 5, -20); wall1.receiveShadow = true; scene.add(wall1);
+        const wall2 = new THREE.Mesh(wallGeo, wallMat); wall2.position.set(0, 5, 20); wall2.receiveShadow = true; scene.add(wall2);
+        const wall3 = new THREE.Mesh(wallGeo, wallMat); wall3.position.set(-20, 5, 0); wall3.rotation.y = Math.PI / 2; wall3.receiveShadow = true; scene.add(wall3);
+        const wall4 = new THREE.Mesh(wallGeo, wallMat); wall4.position.set(20, 5, 0); wall4.rotation.y = Math.PI / 2; wall4.receiveShadow = true; scene.add(wall4);
+
+        // --- FOOD MODELS GENERATION ---
+        function createFoodPedestal(x, z, foodGroup, name, isHealthy) {
+            // Pedestal
+            const pedGeo = new THREE.CylinderGeometry(0.8, 1, 1.2, 16);
+            const pedMat = new THREE.MeshStandardMaterial({ color: 0xe0e0e0 });
+            const pedestal = new THREE.Mesh(pedGeo, pedMat);
+            pedestal.position.set(x, 0.6, z);
+            pedestal.castShadow = true;
+            pedestal.receiveShadow = true;
+            scene.add(pedestal);
+
+            // Light above pedestal
+            const pLight = new THREE.PointLight(0xffffff, 0.5, 5);
+            pLight.position.set(x, 3, z);
+            scene.add(pLight);
+
+            // Food Group placement
+            foodGroup.position.set(x, 1.6, z); // Float above pedestal
+            scene.add(foodGroup);
+            
+            // Interaction hitbox (invisible sphere)
+            const hitGeo = new THREE.SphereGeometry(1.5, 8, 8);
+            const hitMat = new THREE.MeshBasicMaterial({ visible: false });
+            const hitbox = new THREE.Mesh(hitGeo, hitMat);
+            hitbox.position.set(x, 1.6, z);
+            hitbox.userData = { isFood: true, name: name, isHealthy: isHealthy, object: foodGroup, pedestal: pedestal, light: pLight };
+            scene.add(hitbox);
+            interactableObjects.push(hitbox);
+
+            return foodGroup;
+        }
+
+        const foods = [];
+
+        // 1. Brokoli (Sihat)
+        const broccoli = new THREE.Group();
+        const stalk = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.1, 0.5), new THREE.MeshStandardMaterial({color: 0x8FBC8F}));
+        stalk.position.y = 0.25; broccoli.add(stalk);
+        const crownMat = new THREE.MeshStandardMaterial({color: 0x228B22, roughness: 0.9});
+        const c1 = new THREE.Mesh(new THREE.SphereGeometry(0.3), crownMat); c1.position.set(0, 0.6, 0); broccoli.add(c1);
+        const c2 = new THREE.Mesh(new THREE.SphereGeometry(0.25), crownMat); c2.position.set(0.2, 0.5, 0.1); broccoli.add(c2);
+        const c3 = new THREE.Mesh(new THREE.SphereGeometry(0.25), crownMat); c3.position.set(-0.2, 0.5, 0.1); broccoli.add(c3);
+        const c4 = new THREE.Mesh(new THREE.SphereGeometry(0.25), crownMat); c4.position.set(0, 0.5, -0.2); broccoli.add(c4);
+        foods.push(createFoodPedestal(-5, -8, broccoli, "Brokoli", true));
+
+        // 2. Roti (Sihat)
+        const roti = new THREE.Group();
+        const breadMat = new THREE.MeshStandardMaterial({color: 0xDEB887});
+        const crustMat = new THREE.MeshStandardMaterial({color: 0x8B4513});
+        const slice = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.6, 0.1), breadMat);
+        const crust = new THREE.Mesh(new THREE.BoxGeometry(0.65, 0.65, 0.05), crustMat);
+        slice.position.y = 0.3; crust.position.y = 0.3;
+        roti.add(slice); roti.add(crust);
+        foods.push(createFoodPedestal(0, -10, roti, "Roti Penuh Bijirin", true));
+
+        // 3. Pegaga (Sihat)
+        const pegaga = new THREE.Group();
+        const stemMat = new THREE.MeshStandardMaterial({color: 0x32CD32});
+        const leafMat = new THREE.MeshStandardMaterial({color: 0x006400, side: THREE.DoubleSide});
+        const pStem = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.6), stemMat); pStem.position.y = 0.3;
+        const pLeaf = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.4, 0.01), leafMat); 
+        pLeaf.position.y = 0.6; pLeaf.rotation.x = Math.PI / 6;
+        pegaga.add(pStem); pegaga.add(pLeaf);
+        foods.push(createFoodPedestal(5, -8, pegaga, "Daun Pegaga", true));
+
+        // 4. Donut (Tidak Sihat)
+        const donut = new THREE.Group();
+        const dGeo = new THREE.TorusGeometry(0.3, 0.15, 16, 32);
+        const dMat = new THREE.MeshStandardMaterial({color: 0xFF69B4}); // Pink frosting
+        const dMesh = new THREE.Mesh(dGeo, dMat);
+        dMesh.rotation.x = Math.PI / 2; dMesh.position.y = 0.3;
+        donut.add(dMesh);
+        foods.push(createFoodPedestal(-8, 0, donut, "Donut Manis", false));
+
+        // 5. Piza (Tidak Sihat)
+        const pizza = new THREE.Group();
+        const pzGeo = new THREE.CylinderGeometry(0.6, 0.6, 0.05, 3, 1);
+        const pzMat = new THREE.MeshStandardMaterial({color: 0xFFA500});
+        const pzMesh = new THREE.Mesh(pzGeo, pzMat);
+        pzMesh.position.y = 0.2;
+        // Pepperoni
+        const pepMat = new THREE.MeshStandardMaterial({color: 0x8B0000});
+        const pep1 = new THREE.Mesh(new THREE.CylinderGeometry(0.1,0.1,0.06), pepMat); pep1.position.set(0.1, 0.2, 0.1); pizza.add(pep1);
+        const pep2 = new THREE.Mesh(new THREE.CylinderGeometry(0.1,0.1,0.06), pepMat); pep2.position.set(-0.2, 0.2, 0); pizza.add(pep2);
+        pizza.add(pzMesh);
+        foods.push(createFoodPedestal(8, 0, pizza, "Piza", false));
+
+        // 6. Burger (Tidak Sihat)
+        const burger = new THREE.Group();
+        const bunMat = new THREE.MeshStandardMaterial({color: 0xDAA520});
+        const meatMat = new THREE.MeshStandardMaterial({color: 0x4A2E00});
+        const bottomBun = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.4, 0.15), bunMat); bottomBun.position.y = 0.1;
+        const meat = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.42, 0.15), meatMat); meat.position.y = 0.25;
+        const topBun = new THREE.Mesh(new THREE.SphereGeometry(0.4, 16, 16, 0, Math.PI * 2, 0, Math.PI/2), bunMat); topBun.position.y = 0.32;
+        burger.add(bottomBun); burger.add(meat); burger.add(topBun);
+        foods.push(createFoodPedestal(0, 8, burger, "Burger Lemak", false));
+
+        // --- AUDIO SETUP (Tone.js) ---
+        const synth = new Tone.PolySynth(Tone.Synth).toDestination();
+        const bgm = new Tone.Part((time, note) => {
+            synth.triggerAttackRelease(note, "8n", time);
+        }, [
+            ["0:0", "C4"], ["0:1", "E4"], ["0:2", "G4"], ["0:3", "E4"],
+            ["1:0", "F4"], ["1:1", "A4"], ["1:2", "C5"], ["1:3", "A4"]
+        ]);
+        bgm.loop = true;
+        bgm.loopEnd = "2m";
+        Tone.Transport.bpm.value = 100;
+
+        function playSound(type) {
+            if (!settings.music) return;
+            const fxSynth = new Tone.Synth().toDestination();
+            if (type === 'success') {
+                fxSynth.triggerAttackRelease("C5", "8n");
+                setTimeout(() => fxSynth.triggerAttackRelease("E5", "4n"), 150);
+            } else if (type === 'fail') {
+                fxSynth.triggerAttackRelease("C3", "8n");
+                setTimeout(() => fxSynth.triggerAttackRelease("G2", "4n"), 150);
+            }
+        }
+
+        // --- PLAYER CONTROLS & MOVEMENT ---
+        const moveSpeed = 0.1;
+        const velocity = new THREE.Vector3();
+        const direction = new THREE.Vector3();
+        let moveState = { forward: false, backward: false, left: false, right: false };
+        
+        // Touch Input Variables
+        let touchMoveX = 0, touchMoveY = 0;
+        let isDraggingLook = false;
+        let previousTouch = { x: 0, y: 0 };
+        const euler = new THREE.Euler(0, 0, 0, 'YXZ');
+        const PI_2 = Math.PI / 2;
+
+        // Auto detect mobile device for default settings
+        const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+        if(!isMobile) {
+            settings.controller = 'keyboard';
+            document.getElementById('select-controller').value = 'keyboard';
+        }
+
+        function updateControlsUI() {
+            const joystickL = document.getElementById('joystick-left');
+            const joystickR = document.getElementById('joystick-right');
+            if (settings.controller === 'touch') {
+                joystickL.style.display = 'block';
+                joystickR.style.display = 'flex';
+            } else {
+                joystickL.style.display = 'none';
+                joystickR.style.display = 'none';
+                if(isGameStarted) document.body.requestPointerLock();
+            }
+        }
+
+        // Touch Listeners
+        document.addEventListener('touchstart', (e) => {
+            if (!isGameStarted || settings.controller !== 'touch') return;
+            for (let i = 0; i < e.changedTouches.length; i++) {
+                const touch = e.changedTouches[i];
+                if (touch.clientX < window.innerWidth / 2) {
+                    // Left Joystick (Move)
+                    touchMoveX = 0; touchMoveY = 0;
+                } else {
+                    // Right Area (Look)
+                    isDraggingLook = true;
+                    previousTouch.x = touch.clientX;
+                    previousTouch.y = touch.clientY;
+                }
+            }
+        }, {passive: false});
+
+        document.addEventListener('touchmove', (e) => {
+            if (!isGameStarted || settings.controller !== 'touch') return;
+            for (let i = 0; i < e.touches.length; i++) {
+                const touch = e.touches[i];
+                if (touch.clientX < window.innerWidth / 2) {
+                    // Calculate virtual joystick delta
+                    const jx = 20 + 60; // center X of joystick
+                    const jy = window.innerHeight - 20 - 60; // center Y
+                    let dx = touch.clientX - jx;
+                    let dy = touch.clientY - jy;
+                    const maxDist = 40;
+                    const dist = Math.sqrt(dx*dx + dy*dy);
+                    if(dist > maxDist) { dx = dx/dist*maxDist; dy = dy/dist*maxDist; }
+                    
+                    document.getElementById('knob-left').style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+                    
+                    touchMoveX = dx / maxDist;
+                    touchMoveY = dy / maxDist;
+                } else if (isDraggingLook) {
+                    // Look around
+                    const movementX = touch.clientX - previousTouch.x;
+                    const movementY = touch.clientY - previousTouch.y;
+                    euler.setFromQuaternion(camera.quaternion);
+                    euler.y -= movementX * 0.005;
+                    euler.x -= movementY * 0.005;
+                    euler.x = Math.max(-PI_2, Math.min(PI_2, euler.x));
+                    camera.quaternion.setFromEuler(euler);
+                    previousTouch.x = touch.clientX;
+                    previousTouch.y = touch.clientY;
+                }
+            }
+        }, {passive: false});
+
+        document.addEventListener('touchend', (e) => {
+            if (!isGameStarted || settings.controller !== 'touch') return;
+            for (let i = 0; i < e.changedTouches.length; i++) {
+                const touch = e.changedTouches[i];
+                if (touch.clientX < window.innerWidth / 2) {
+                    touchMoveX = 0; touchMoveY = 0;
+                    document.getElementById('knob-left').style.transform = `translate(-50%, -50%)`;
+                } else {
+                    isDraggingLook = false;
+                }
+            }
+        });
+
+        // Keyboard Listeners
+        document.addEventListener('keydown', (e) => {
+            if(settings.controller !== 'keyboard') return;
+            switch(e.code) {
+                case 'KeyW': case 'ArrowUp': moveState.forward = true; break;
+                case 'KeyS': case 'ArrowDown': moveState.backward = true; break;
+                case 'KeyA': case 'ArrowLeft': moveState.left = true; break;
+                case 'KeyD': case 'ArrowRight': moveState.right = true; break;
+            }
+        });
+        document.addEventListener('keyup', (e) => {
+            if(settings.controller !== 'keyboard') return;
+            switch(e.code) {
+                case 'KeyW': case 'ArrowUp': moveState.forward = false; break;
+                case 'KeyS': case 'ArrowDown': moveState.backward = false; break;
+                case 'KeyA': case 'ArrowLeft': moveState.left = false; break;
+                case 'KeyD': case 'ArrowRight': moveState.right = false; break;
+            }
+        });
+
+        // Mouse Look
+        document.addEventListener('mousemove', (e) => {
+            if (settings.controller === 'keyboard' && document.pointerLockElement === document.body) {
+                euler.setFromQuaternion(camera.quaternion);
+                euler.y -= e.movementX * 0.002;
+                euler.x -= e.movementY * 0.002;
+                euler.x = Math.max(-PI_2, Math.min(PI_2, euler.x));
+                camera.quaternion.setFromEuler(euler);
+            }
+        });
+        document.getElementById('game-canvas').addEventListener('click', () => {
+            if (settings.controller === 'keyboard' && isGameStarted) document.body.requestPointerLock();
+        });
+
+        // --- RAYCASTING (INTERACTION) ---
+        const raycaster = new THREE.Raycaster();
+        const center = new THREE.Vector2(0, 0); // Center of screen
+        const uiInteraction = document.getElementById('interaction-ui');
+        const foodNameText = document.getElementById('food-name');
+
+        function checkInteractions() {
+            raycaster.setFromCamera(center, camera);
+            const intersects = raycaster.intersectObjects(interactableObjects);
+
+            if (intersects.length > 0 && intersects[0].distance < 6) {
+                const object = intersects[0].object;
+                if (currentTarget !== object) {
+                    currentTarget = object;
+                    document.getElementById('crosshair').style.borderColor = 'green';
+                    document.getElementById('crosshair').style.transform = 'translate(-50%, -50%) scale(1.5)';
+                    
+                    // Show UI
+                    foodNameText.innerText = object.userData.name;
+                    uiInteraction.classList.remove('hidden');
+                    uiInteraction.classList.add('flex');
+                    
+                    // Unlock pointer temporarily if using keyboard so they can click the UI
+                    if(settings.controller === 'keyboard' && document.pointerLockElement) {
+                        document.exitPointerLock();
+                    }
+                }
+            } else {
+                if (currentTarget) {
+                    currentTarget = null;
+                    document.getElementById('crosshair').style.borderColor = 'black';
+                    document.getElementById('crosshair').style.transform = 'translate(-50%, -50%) scale(1)';
+                    uiInteraction.classList.add('hidden');
+                    uiInteraction.classList.remove('flex');
+                }
+            }
+        }
+
+        // --- GAME LOGIC ---
+        window.classifyFood = function(selectedHealthy) {
+            if (!currentTarget) return;
+            const data = currentTarget.userData;
+            const isCorrect = data.isHealthy === selectedHealthy;
+
+            if (isCorrect) {
+                score += 10;
+                playSound('success');
+                document.getElementById('game-status').innerHTML = `<span class="text-green-600 font-bold">Betul! +10 Markah</span>`;
+            } else {
+                score -= 5;
+                playSound('fail');
+                document.getElementById('game-status').innerHTML = `<span class="text-red-600 font-bold">Salah! -5 Markah</span>`;
+            }
+
+            document.getElementById('score-display').innerText = score;
+            
+            // Remove food and interactable
+            scene.remove(data.object);
+            scene.remove(data.light);
+            interactableObjects = interactableObjects.filter(obj => obj !== currentTarget);
+            scene.remove(currentTarget); // Remove hitbox
+
+            currentTarget = null;
+            uiInteraction.classList.add('hidden');
+            uiInteraction.classList.remove('flex');
+            
+            // Regain pointer lock if kb
+            if(settings.controller === 'keyboard') document.body.requestPointerLock();
+
+            foodsClassified++;
+            if (foodsClassified >= totalFoods) {
+                setTimeout(endGame, 1000);
+            }
+        };
+
+        function endGame() {
+            isGameStarted = false;
+            if(document.pointerLockElement) document.exitPointerLock();
+            Tone.Transport.stop();
+            document.getElementById('end-screen').classList.remove('hidden');
+            document.getElementById('final-score').innerText = score;
+        }
+
+        // --- ANIMATION LOOP ---
+        const clock = new THREE.Clock();
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const delta = clock.getDelta();
+
+            // Rotate foods
+            foods.forEach(food => {
+                if (food.parent === scene) {
+                    food.rotation.y += 1 * delta;
+                }
+            });
+
+            if (isGameStarted) {
+                // Movement logic
+                direction.z = 0; direction.x = 0;
+                
+                if (settings.controller === 'touch') {
+                    direction.z = touchMoveY;
+                    direction.x = touchMoveX;
+                } else {
+                    if (moveState.forward) direction.z -= 1;
+                    if (moveState.backward) direction.z += 1;
+                    if (moveState.left) direction.x -= 1;
+                    if (moveState.right) direction.x += 1;
+                }
+
+                direction.normalize();
+
+                // Apply movement relative to camera look direction
+                if (direction.lengthSq() > 0) {
+                    const dir = new THREE.Vector3(direction.x, 0, direction.z);
+                    dir.applyQuaternion(camera.quaternion);
+                    dir.y = 0; // Don't fly
+                    dir.normalize();
+                    
+                    camera.position.addScaledVector(dir, moveSpeed * (delta * 60));
+                    
+                    // Simple bounds collision
+                    camera.position.x = Math.max(-19, Math.min(19, camera.position.x));
+                    camera.position.z = Math.max(-19, Math.min(19, camera.position.z));
+                }
+
+                checkInteractions();
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        // --- RESIZE HANDLER ---
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // --- UI & SETTINGS LOGIC ---
+        document.getElementById('btn-start').addEventListener('click', async () => {
+            await Tone.start();
+            document.getElementById('overlay-screen').classList.add('hidden');
+            isGameStarted = true;
+            if(settings.music) {
+                Tone.Transport.start();
+                bgm.start(0);
+            }
+            updateControlsUI();
+        });
+
+        const modalSettings = document.getElementById('settings-modal');
+        document.getElementById('btn-settings').addEventListener('click', () => {
+            modalSettings.classList.remove('hidden');
+            if(document.pointerLockElement) document.exitPointerLock();
+        });
+        document.getElementById('btn-close-settings').addEventListener('click', () => {
+            modalSettings.classList.add('hidden');
+            if(isGameStarted && settings.controller === 'keyboard') document.body.requestPointerLock();
+        });
+
+        document.getElementById('toggle-music').addEventListener('change', (e) => {
+            settings.music = e.target.checked;
+            if (settings.music && isGameStarted) {
+                Tone.Transport.start();
+                if(bgm.state !== 'started') bgm.start(0);
+            } else {
+                Tone.Transport.stop();
+            }
+        });
+
+        document.getElementById('toggle-resolution').addEventListener('change', (e) => {
+            settings.highRes = e.target.checked;
+            renderer.setPixelRatio(settings.highRes ? window.devicePixelRatio : 0.5);
+        });
+
+        document.getElementById('select-controller').addEventListener('change', (e) => {
+            settings.controller = e.target.value;
+            updateControlsUI();
+        });
+
+        document.getElementById('btn-fullscreen').addEventListener('click', () => {
+            if (!document.fullscreenElement) {
+                document.documentElement.requestFullscreen().catch(err => {
+                    alert(`Error attempting to enable fullscreen: ${err.message}`);
+                });
+                document.getElementById('btn-fullscreen').innerText = "Tutup";
+            } else {
+                document.exitFullscreen();
+                document.getElementById('btn-fullscreen').innerText = "Buka";
+            }
+        });
+
+        // Start Animation Loop
+        animate();
+
+    </script>
+</body>
+</html>
